@@ -1,0 +1,978 @@
+---
+title: "Assignment 1 - Processing GEO GSE251939"
+author: "Clare Gillis"
+date: "Feb 8, 2025"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 5
+bibliography: A1_bib.bib
+csl: biomed-central.csl
+nocite: '@*'
+---
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+# ==================
+# Install Required Packages
+# ==================
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+if (!requireNamespace("GEOquery", quietly = TRUE)) {
+  BiocManager::install("GEOquery")
+}
+
+if (!requireNamespace("edgeR", quietly = TRUE)) {
+  BiocManager::install("edgeR")
+}
+
+if (!requireNamespace("biomaRt", quietly = TRUE)) {
+  BiocManager::install("biomaRt")
+}
+
+if (!requireNamespace("kableExtra", quietly = TRUE)){
+  install.packages("kableExtra")
+}
+
+if (!requireNamespace("reshape2", quietly = TRUE)){
+  install.packages("reshape2")
+}
+
+if (!requireNamespace("R.utils", quietly = TRUE)){
+  install.packages("R.utils")
+}
+
+if (!requireNamespace("readxl", quietly = TRUE)){
+  install.packages("readxl")
+}
+
+library(readxl)
+library(R.utils)
+library(reshape2)
+library(kableExtra)
+library(edgeR)
+library(GEOquery)
+library(knitr)
+library(biomaRt)
+library(dplyr)
+library(ggplot2)
+```
+
+# Intro to the dataset
+
+This report documents my initial processing of the dataset sourced from GEO
+accession [GSE251939](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE251939).
+
+## Download Data
+
+I'll begin by downloading the dataset from GEO using the getGEO program
+```{r message=FALSE, echo=TRUE}
+# ==================
+# Get the GEO accession
+# ==================
+data_set_geoid <- "GSE251939"
+gse <- GEOquery::getGEO(data_set_geoid ,GSEMatrix=FALSE)
+```
+
+## Data Summary
+
+Now let's see what the dataset is about
+```{r echo=TRUE, results="asis"}
+# ==================
+# Print the title and summary of the downloaded dataset
+# ==================
+title <- paste0("**", gse@header$title, "**\n\n")
+summary <- paste(gse@header$summary, "\n\n")
+design <- gse@header$overall_design[[1]]
+
+cat(title, summary, design)
+```
+
+===============================================================================
+
+To summarize, this is a dataset of batch RNAseq data from layer 3 (L3) and 5 (L5)
+pyramidal neurons of individuals with Down Syndrome (DS) compared to control brains. 
+Many people with Down Syndrom develop pathology of Alzheimer's Disease (AD), 
+particularily in their L3 and L5 pyramidal neurons--this makes studying the
+gene expression in L3 and L5 pyramidal neurons particularily interesting [@DS_article]. Before
+this project, I was unaware of the prevalence of AD pathology among DS individuals,
+so I am looking forward to delving deeper through this dataset this semester.
+
+This dataset consists of RNA-seq data from L3 and L5 pyramidal neurons of the
+BA9 region of the frontal-cortices of 12 individuals with Down Syndrome, and 17
+control brains [@DS_article]. 
+
+# Dive deeper
+
+## Assess
+
+### Overview
+There is a lot of information about this dataset held in the object we downloaded.
+Lets start by extracting some of the overview information about the dataset.
+```{r}
+# ==================
+# Extract overview info about the accession
+# ==================
+current_gpl <- names(GPLList(gse))[1]
+current_gpl_info <- GEOquery::Meta(getGEO(current_gpl))
+```
+
+The dataset I've selected needs to contain recent (less than 10 years old) human 
+RNA-seq data (generally gathered through high throughput sequencing.)
+
+Let's check if this is true from the overview information we just extracted
+
+```{r}
+# ==================
+# Check that the dataset fits age, species, and technology criteria
+# ==================
+cat(paste("Last update date:", current_gpl_info$last_update_date, "\n"))
+cat(paste("Organism:", current_gpl_info$organism, "\n"))
+cat(paste("Technology:", current_gpl_info$technology, "\n"))
+```
+
+Looks good!
+
+Now that we know the most basic criteria are met, lets take a closer look at what
+the dataset contains. We'll start by checking out the names of the supplementary 
+files.
+
+### Suppplementary files
+```{r}
+# ==================
+# Extract supplementary filenames
+# ==================
+sfilenames = GEOquery::getGEOSuppFiles(data_set_geoid, fetch_files = FALSE)
+sfilenames$fname
+```
+
+We're given 6 files - let's download them to our current directory so we can
+open and use them.
+
+```{r}
+# ==================
+# Save the supplementary files
+# ==================
+
+# We're choosing to download the files in the current working directory
+download_dir <- file.path(getwd())
+
+# Check which of the supplementary files are missing from download_dir
+missing_files <- sfilenames$fname[!unlist(
+  lapply(sfilenames$fname,FUN=function(x){
+  file.exists(file.path(download_dir,data_set_geoid,x)
+              )
+    }
+  )
+  )
+  ]
+
+# Download each file only if it doesn't exist yet - we don't want to download
+# things more than once
+if(length(missing_files) > 0){
+  for(i in 1:length(missing_files)){
+    #get the supplementary files
+    sfiles = GEOquery::getGEOSuppFiles(data_set_geoid,
+                             filter_regex = missing_files[i],
+                             baseDir = download_dir,
+                             fetch_files = TRUE)
+    }
+}
+
+```
+
+### Extract Count Matrices
+
+Based on the names of the files, we can infer what some of them contain. To start,
+the names of GSE251939_count_matrix_l3.txt.gz and GSE251939_count_matrix_l5.txt.gz
+indicate that they contain the actual count matrices of our RNA seq data, with the
+first containing the data from L3 cells, and the second containing the data from
+the L5 cells. Let's open those up and pull out the count matrices.
+
+```{r}
+# ==================
+# Extract the RNAseq counts from the desired files
+# ==================
+
+data_filename_l3 <- sfilenames$fname[4]
+data_filename_l5 <- sfilenames$fname[5]
+
+
+# Layer 3 sample data ###
+
+# Read in the counts table for layer 3 cell data
+l3_ds_vs_ctl_data <- read.table(
+  file.path(download_dir, data_set_geoid, data_filename_l3),
+  header=TRUE,
+  check.names=TRUE)
+
+# Append _L3 to the end of layer 3 sample names to differentiate them from layer 
+# 5 samples
+colnames(l3_ds_vs_ctl_data) <- paste0(colnames(l3_ds_vs_ctl_data), "_L3")
+
+cat(paste(
+  "Layer 3 #Genes x #Samples: ", 
+  dim(l3_ds_vs_ctl_data)[1], 
+  "x", 
+  dim(l3_ds_vs_ctl_data)[2],
+  "\n"
+  )
+  )
+
+
+# Layer 5 sample data ###
+
+# Read in the counts table for layer 5 cell data
+l5_ds_vs_ctl_data <- read.table(
+  file.path(download_dir, data_set_geoid, data_filename_l5),
+  header=TRUE,
+  check.names=TRUE)
+
+# Append _L5 to the end of layer 5 sample names
+colnames(l5_ds_vs_ctl_data) <- paste0(colnames(l5_ds_vs_ctl_data), "_L5")
+
+cat(paste(
+  "Layer 5 #Genes x #Samples: ", 
+  dim(l5_ds_vs_ctl_data)[1], 
+  "x", 
+  dim(l5_ds_vs_ctl_data)[2],
+  "\n"
+  )
+  )
+
+
+# All sample data ###
+
+# Combine the layer 3 and layer 5 count matrices
+ds_vs_ctl_data <- cbind(l3_ds_vs_ctl_data, l5_ds_vs_ctl_data)
+
+cat(paste(
+  "Total #Genes x #Samples: ", 
+  dim(ds_vs_ctl_data)[1], 
+  "x", 
+  dim(ds_vs_ctl_data)[2],
+  "\n"
+  )
+  )
+
+```
+
+The count matrices contain data for 61906 genes which is excellent coverage, but
+the number of samples is odd... In the summary, we're told that the dataset 
+contains samples from 29 people (12 DS, 17 CTR) - why are we seeing 46 Layer 3 
+samples and 36 Layer 5 samples? It's likely these are from technical replicates, 
+so let's take a look at how the creators of the database handled these by 
+extracting some information about data processing and the samples. 
+
+```{r}
+# ==================
+# Extract data processing and sample information
+# ==================
+cat(paste(gse@gsms[["GSM7990296"]]@header[["extract_protocol_ch1"]][[2]], "\n\n"))
+cat(paste(gse@gsms[["GSM7990296"]]@header[["extract_protocol_ch1"]][[3]], "\n\n"))
+cat(paste(gse@gsms[[1]]@header$data_processing[[2]], "\n\n"))
+```
+
+Here the authors explain that they combined each of the two technical replicates
+per sample into one - this would make us expect that there would be exactly 29 
+samples per layer, but this is not the case. Perhaps there is some more
+information in the supplementary files.
+
+![Lines 1-38 of GSE251939_Layer_3_Technical_replicates.xlsx. This file outlines
+which of the samples of layer 3 that met the quality threshold were combined into 
+one sample and which remained independent samples](Layer_3_replicates.png)
+
+
+![Lines 1-38 of GSE251939_Layer_5_Technical_replicates.xlsx. This file outlines
+which of the samples of layer 5 that met the quality threshold were combined into 
+one sample and which remained independent samples](Layer_5_replicates.png)
+
+### Combine technical replicates
+
+Aha! What appears to have happened, is that the authors failed to standardize their 
+protocol on combining replicate samples. It is likely they extracted samples that
+did not meet their quality threshold, so they repeated these samples and added
+an R to their name (albeit without standardized naming conventions.) For some of
+these replicates, they combined them with an original technical replicate that met
+the threshold, while for others, they left them as individual samples. Moreover,
+when there resulted more than two replicates that met the threshold, they combined
+only two into one sample, leaving at least one as an individual. For smoother data
+handling, I will combine all technical replicates.
+
+```{r}
+# ==================
+# Combine technical replicates
+# ==================
+
+# Extract the sample ids from the original sample names
+sampleIDs <- sub("(h\\d+).*?_L(\\d+)", "\\1_L\\2", colnames(ds_vs_ctl_data))
+
+# Combine replicates using row-wise means for sample
+combined_replicates <- as.data.frame(sapply(unique(sampleIDs), function(g) {
+  rowMeans(ds_vs_ctl_data[, sampleIDs == g, drop = FALSE], na.rm = TRUE)
+}))
+
+# Assign new columns names as the sample ids
+colnames(combined_replicates) <- unique(sampleIDs)
+
+# Print new numbers of genes and samples after combining technical replicates
+cat("After combining replicates:\n")
+
+cat(paste(
+  "Layer 3 #Genes x #Samples: ", 
+  dim(combined_replicates)[1], 
+  "x", 
+  sum(grepl("L3$", colnames(combined_replicates))),
+  "\n"
+  )
+  )
+
+cat(paste(
+  "Layer 5 #Genes x #Samples: ", 
+  dim(combined_replicates)[1], 
+  "x", 
+  sum(grepl("L5$", colnames(combined_replicates))),
+  "\n"
+  )
+  )
+
+
+cat(paste(
+  "Total replicates #Genes x #Samples: ", 
+  dim(combined_replicates)[1], 
+  "x", 
+  dim(combined_replicates)[2],
+  "\n"
+  )
+  )
+
+```
+
+## Map to HUGO symbols
+
+Let's now take a quick look at the count matrix itself.
+
+```{r}
+# ==================
+# Snapshot of the count matrix
+# ==================
+
+kable(combined_replicates[1:7,1:10], format = "html")
+```
+
+The genes seen on the left are denoted by ensembl IDs, however we
+would like to use HUGO gene symbols. Thankfully, it looks like the ensembl 
+IDs are gene IDs (based on the G in ENSG at the beginning of 
+each) making them easy to map to HUGO symbols.
+
+To map our ensembl gene IDs to HUGO symbols, we first need to choose
+the right dataset.
+
+```{r}
+# ==================
+# Choose human gene
+# ==================
+
+# Look at the archived versions of ensembl - remeber our dataset was last 
+# updated in Nov 2018, so lets use an ensembl version closer to then
+biomaRt::listEnsemblArchives()[1:20,]
+ensembl_2019_version <- "https://sep2019.archive.ensembl.org"
+
+# Get the ensembl datasets
+ensembl_2019 <- biomaRt::useMart("ensembl", host = ensembl_2019_version)
+datasets <- biomaRt::listDatasets(ensembl_2019)
+
+# List the datasets that contain "sapiens" in their name - these are the
+# human datasets
+kable(head(datasets[grep(datasets$dataset, pattern = "sapiens"),]), format = 'html')
+```
+<br />
+Great! It looks like there's only one dataset of human genes to pick from. 
+```{r}
+# ==================
+# Select human gene dataset
+# ==================
+ensembl_2019 = biomaRt::useDataset("hsapiens_gene_ensembl",mart=ensembl_2019)
+```
+
+Now let's take a look at the filters we can use to search the dataset (this is
+to figure out which search terms to use when mapping our gene IDs to HUGO symbols.)
+```{r}
+# ==================
+# List filters
+# ==================
+biomart_human_filters <- biomaRt::listFilters(ensembl_2019)
+
+# List the filters containing the word "ensembl" or "hgnc"
+kable(biomart_human_filters[grep(biomart_human_filters$name,pattern="ensembl|hgnc"),], format="html")
+```
+<br />
+You'll see that fiter 53 can be used to search based on "Gene stable ID(s)" - 
+that's exactly what we have! Let's pull out the HUGO symbols for our gene IDs.
+Before we search, lets make sure that we only have ensembl Gene IDs, not IDs with
+version numbers.
+
+```{r}
+# ==================
+# Remove version numbers
+# ==================
+
+# Check how many gene IDs have a version number
+numWithVersion <- sum(grepl("\\.", rownames(combined_replicates)))
+cat(paste("Number of gene IDs with version number:", numWithVersion))
+
+# Extract only the Gene IDs (the part before the period)
+geneIDs <- sub("\\..*", "", rownames(combined_replicates))
+```
+
+```{r}
+# ==================
+# Search for HUGO symbols by enesmbl Gene IDs
+# ==================
+
+# check to see if there is a file containing the conversion between ensembl gene
+# IDs and HUGO gene symbols
+conversion_stash_2019 <- "id_conversion_2019.rds"
+if(file.exists(conversion_stash_2019)){
+  id_conversion <- readRDS(conversion_stash_2019)
+} else {
+  
+  # Extract the mapping of gene IDs to HUGO symbols for all of the genes in
+  # our dataset, then save them in a file
+  id_conversion <- biomaRt::getBM(attributes =
+                           c("ensembl_gene_id","hgnc_symbol"),
+                         filters = c("ensembl_gene_id"),
+                         values = geneIDs,
+                         mart = ensembl_2019)
+  saveRDS(id_conversion, conversion_stash_2019)
+}
+
+# Create a new column in combined_replicates with cleaned gene IDs
+combined_replicates$gene_id_clean <- sub("\\..*", "", rownames(combined_replicates))
+
+# Add the HUGO symbols to our data matrix 
+combined_replicates_annot <- merge(
+  id_conversion, 
+  combined_replicates, 
+  by.x = 1, 
+  by.y = "gene_id_clean", 
+  all.y=TRUE
+)
+colnames(combined_replicates_annot)[colnames(combined_replicates_annot) == "hgnc_symbol"] <- "hgnc_symbol_2019"
+
+cat(paste("Genes in our dataset:", nrow(combined_replicates), "\n"))
+cat(paste("Gene IDs in our dataset mapped to HUGO symbols:", 
+          length(
+            which(combined_replicates$gene_id_clean %in% id_conversion$ensembl_gene_id)), "\n"))
+cat(paste(
+  "Gene IDs in our dataset missing HUGO symbols:", 
+  nrow(combined_replicates) - length(
+    which(combined_replicates$gene_id_clean %in% id_conversion$ensembl_gene_id)), "\n"))
+```
+<br />
+Many genes are missing HUGO symbols - it is possible these genes have been annotated
+since our dataset was last updated. Let's try to map them to HUGO symbols using
+the most recent release of ensembl on biomaRt
+
+```{r}
+# ==================
+# Search for HUGO symbols by enesmbl Gene IDs - 2024 Ensembl
+# ==================
+
+# Select the current ensembl release
+ensembl_2024_version <- "https://oct2024.archive.ensembl.org"
+ensembl_2024 <- biomaRt::useMart("ensembl", host = ensembl_2024_version)
+datasets <- biomaRt::listDatasets(ensembl_2024)
+
+# Select the human dataset
+ensembl_2024 = biomaRt::useDataset("hsapiens_gene_ensembl",mart=ensembl_2024)
+
+# check to see if there is a file containing the conversion between ensembl gene
+# IDs and HUGO gene symbols
+conversion_stash_2024 <- "id_conversion_2024.rds"
+if(file.exists(conversion_stash_2024)){
+  id_conversion <- readRDS(conversion_stash_2024)
+} else {
+  # Extract the mapping of gene IDs to HUGO symbols for all of the genes in
+  # our dataset, then save them in a file
+  id_conversion <- biomaRt::getBM(attributes =
+                           c("ensembl_gene_id","hgnc_symbol"),
+                         filters = c("ensembl_gene_id"),
+                         values = geneIDs,
+                         mart = ensembl_2024)
+  saveRDS(id_conversion, conversion_stash_2024)
+}
+
+# Add the HUGO symbols to our data matrix 
+combined_replicates_annot <- merge(
+  id_conversion, 
+  combined_replicates_annot, 
+  by.x = 1, 
+  by.y = "ensembl_gene_id", 
+  all.y=TRUE
+)
+colnames(combined_replicates_annot)[colnames(combined_replicates_annot) == "hgnc_symbol"] <- "hgnc_symbol_2024"
+
+num_with_symbol <- sum(
+            !is.na(combined_replicates_annot$hgnc_symbol_2024) | 
+              !is.na(combined_replicates_annot$hgnc_symbol_2019))
+
+cat(paste("Genes in our dataset:", nrow(combined_replicates_annot), "\n"))
+cat(paste("Gene IDs in our dataset mapped to HUGO symbols:", num_with_symbol, "\n"))
+cat(paste(
+  "Gene IDs in our dataset missing HUGO symbols:", 
+  nrow(combined_replicates) - num_with_symbol, "\n"))
+```
+
+Much better! Now let's take a look at those unmapped gene IDs and see why they
+aren't mapped to HUGO symbols
+```{r}
+# ==================
+# Display entries without HUGO symbol
+# ==================
+kable(combined_replicates_annot[which(is.na(combined_replicates_annot$hgnc_symbol_2024) & is.na(combined_replicates_annot$hgnc_symbol_2019))[1:5],1:5], type="html")
+```
+
+![Snapshot of the Ensembl page for ENSG00000288526 [@Ensembl2024]](ENSG00000288526.png)
+
+![Snapshot of the Ensembl page for ENSG00000288531 [@Ensembl2024]](ENSG00000288531.png)
+
+![Snapshot of the Ensembl page for ENSG00000288553 [@Ensembl2024]](ENSG00000288553.png)
+
+![Snapshot of the Ensembl page for ENSG00000288526 [@Ensembl2024]](ENSG00000288554.png)
+
+![Snapshot of the Ensembl page for ENSG00000288526 [@Ensembl2024]](ENSG00000288565.png)
+
+<br />
+Based on the first five genes, these gene IDs have been retired, so we will remove
+them from our dataset.
+
+```{r}
+# ==================
+# Remove entries without HUGO symbol
+# ==================
+
+clean_data <- combined_replicates_annot[ 
+  !is.na(combined_replicates_annot$hgnc_symbol_2024) | !is.na(combined_replicates_annot$hgnc_symbol_2019), 
+]
+```
+
+Since we mapped our gene IDs to HUGO symbols using ensembl from 2019 and 2024, 
+there may be some discrepancies. Lets map each entry to its the HUGO symbol from 
+2024 if available, and fall back on the 2019 symbol whenever necessary.
+```{r}
+# ==================
+# Consolidate HUGO symbols
+# ==================
+
+# Take hgnc_symbol_2024 evenever possible, if not, take hgnc_symbol_2019
+# Remove hgnc_symbol_2024 and hgnc_symbol_2019
+clean_data <- clean_data %>%
+  mutate(hgnc_symbol = coalesce(hgnc_symbol_2024, hgnc_symbol_2019)) %>%
+  select(-hgnc_symbol_2024, -hgnc_symbol_2019)
+```
+
+Finally, lets make sure that each symbol and gene ID is unique.
+```{r}
+# ==================
+# Search for duplicate gene IDs and symbols
+# ==================
+
+cat(paste(
+  "Duplicate hgnc_symbol:", 
+  sum(duplicated(clean_data$hgnc_symbol)),
+  "\n"
+  )
+  )
+cat(paste(
+  "Duplicate ensembl_gene_id:", 
+  sum(duplicated(clean_data$ensembl_gene_id)),
+  "\n"
+  )
+  )
+```
+
+The dataset contains many duplicated hgnc symbols and 53 ensembl gene IDs are 
+duplicates - lets take one from each duplicated set of ensembl IDs and hgnc symbols.
+```{r}
+# ==================
+# Remove duplicate ensembl IDs and hgnc symbols
+# ==================
+
+# Take the first HUGO symbol for each set of duplicated ensembl IDs
+clean_data <- clean_data[!duplicated(clean_data$ensembl_gene_id), ]
+
+# Take the first ensembl gene ID for each set of duplicted HUGO symbols
+clean_data <- clean_data[!duplicated(clean_data$hgnc_symbol), ]
+
+# Map the rows to only HUGO symbols
+rownames(clean_data) <- clean_data$hgnc_symbol
+clean_data <- clean_data %>%
+  select(-ensembl_gene_id, -hgnc_symbol)
+
+
+```
+
+Great! Now we have a dataset of RNA-Seq data where each row corresponds to a gene
+represented by a unique HUGO symbol! We can now move onto normalization.
+
+# Normalize
+
+We'll start by taking a closer look at our samples which can give us some
+important parameters for normalization.
+
+```{r}
+# ==================
+# Extract samples and count them by layer and diagnosis
+# ==================
+
+# Extract all samples 
+list_of_samples <- gse@gsms
+
+# Get the name and characteristics of each sample
+sample_type <- do.call(rbind, lapply(list_of_samples, 
+                                     FUN=function(x){
+                                       c(x@header$title,
+                                         x@header$characteristics_ch1)
+                                       }
+                                     )
+                       )
+colnames(sample_type) <- c("title", "cell type", "diagnosis", "layer")
+sample_type[,"cell type"] <- gsub(sample_type[, "cell type"],
+                                  pattern = "cell type: ",
+                                  replacement = "")
+sample_type[,"diagnosis"] <- gsub(sample_type[, "diagnosis"],
+                                  pattern = "diagnosis: ",
+                                  replacement = "")
+sample_type[,"layer"] <- gsub(sample_type[, "layer"],
+                                  pattern = "layer: ",
+                                  replacement = "")
+
+# Extract sample IDs from the title (ex. 'h270' from 'FCPN, Layer3,CTR, h270B_Layer3')
+redundant_sample_type_dt <- data.table::data.table(sample_type)
+redundant_sample_type_dt[, "sampleID"] <- sub(".*(h\\d+).*", "\\1", redundant_sample_type_dt$title)
+
+# Remove all technical replicates
+sample_type_dt <- redundant_sample_type_dt[, .SD[1], by = .(sampleID, layer)]
+
+# Count the samples by layer and diagnosis 
+sample_counts <- sample_type_dt[, .(count = .N), by = .(layer, diagnosis)]
+sample_counts
+
+```
+
+The fewest samples we have for a category is 12 - this will be important for our
+CPM normailization.
+
+## CPM
+
+We will start our normalization by removing counts that appear in very few samples.
+These are likely due to technical error and will only add noise to our dataset
+rather than statistically significant context about differential expression. 
+
+We will keep data from any genes that are expressed in at least 10 samples to
+ensure that genes expressed in only the smallest group (N=12) are detected.
+
+```{r}
+# ==================
+# Filter by CPM
+# ==================
+  
+# Convert the count data table to a matrix
+data_matrix <- as.matrix(clean_data)
+
+# Filter based on counts per million (CPM)
+# Keep genes expressed in at least 10 samples to ensure genes expressed only in
+# the smallest group (N=12) are detected
+min_num_samples <- 10
+keep <- rowSums(edgeR::cpm(data_matrix) > 1) > min_num_samples
+filtered_data_matrix <- data_matrix[keep,]
+```
+
+Let's take a look at our expression data before and after CPM normalization
+```{r echo=FALSE}
+# Plot pre- and post-CPM filtering #
+
+# Set up the plotting area for two plots side by side
+par(mfrow = c(1, 2), mar = c(2, 2, 2, 3))
+
+# Density Plot for original count data
+counts_density <- apply(log2(edgeR::cpm(data_matrix)), 2, density)
+
+# Calculate the limits across all the samples
+xlim <- range(sapply(counts_density, function(d) d$x))
+ylim <- range(sapply(counts_density, function(d) d$y))
+
+# Color and line style settings
+cols <- rainbow(length(counts_density))
+ltys <- rep(1, length(counts_density))
+
+# Initialize the plot
+plot(counts_density[[1]], xlim = xlim, ylim = ylim, type = "n", 
+     ylab = "Smoothing density of log2-CPM", main = "Original Count", cex.lab = 0.8)
+
+# Plot each density line
+for (i in 1:length(counts_density)) {
+  lines(counts_density[[i]], col = cols[i])
+}
+
+
+# Density Plot for filtered (normalized) count data
+cpm_counts_density <- apply(log2(edgeR::cpm(filtered_data_matrix)), 2, density)
+
+# Calculate the limits across all the samples for normalized counts
+xlim <- range(sapply(cpm_counts_density, function(d) d$x))
+ylim <- range(sapply(cpm_counts_density, function(d) d$y))
+
+# Plot the normalized count data density
+plot(cpm_counts_density[[1]], xlim = xlim, ylim = ylim, type = "n", 
+     ylab = "Smoothing density of log2-CPM", main = "Normalized count", cex.lab = 0.8)
+
+# Plot each density line
+for (i in 1:length(cpm_counts_density)) {
+  lines(cpm_counts_density[[i]], col = cols[i])
+}
+
+
+# Add the combined legend outside the plotting region
+par(xpd = TRUE)  # Allow plotting outside the plot area
+legend("topright", 
+       legend = colnames(clean_data),  
+       col = cols, 
+       lty = ltys, 
+       cex = 0.34, 
+       border = "blue", 
+       text.col = "green4", 
+       merge = TRUE, 
+       bg = "gray90", 
+       ncol = 1,  # Arrange the legend in one column
+       inset = c(-0.2, 0))  # Move the legend outside the plot
+
+par(xpd = FALSE)  # Restore normal plotting behavior
+
+```
+<br />
+Excellent! The new curve is much smoother, indicating less noisy data. We'll now
+move on to normalizing using the TMM approach.
+
+## TMM
+
+TMM scales RNA-seq data to account for varied library sizes. This is useful for
+making comparisons between samples more reliable when expression varies between 
+them due to technical variablility like differing sequencing depth [@TMM]. 
+
+Lets apply TMM notmalization to our dataset.
+```{r}
+# ==================
+# Apply TMM normalization
+# ==================
+
+sample_type_df = as.data.frame(sample_type, stringsAsFactors = FALSE)
+
+# Apply TMM to the data
+d = edgeR::DGEList(counts=filtered_data_matrix, 
+            groups = factor(sample_type_df$layer, sample_type_df$diagnosis))
+d = edgeR::calcNormFactors(d)
+
+normalized_counts <- edgeR::cpm(d)
+```
+
+Let's take a look at our data before and after TMM normalization. We can use
+various graphing techniques to understand our data in different ways. First we'll
+try a smooth line plot.
+```{r}
+# ==================
+# Plot TMM and non-TMM counts - Smooth Line
+# ==================
+
+# Pre Normalization ####################################
+
+# Set up the plotting area for two plots side by side
+par(mfrow = c(1, 2), mar = c(2, 2, 2, 3))
+
+
+# Plot the filtered (not TMM normalized) data ###
+
+# Calculate the limits across all the samples
+xlim <- range(sapply(cpm_counts_density, function(d) d$x))
+ylim <- range(sapply(cpm_counts_density, function(d) d$y))
+
+# Color and line style settings
+cols <- rainbow(length(cpm_counts_density))
+ltys <- rep(1, length(cpm_counts_density))
+
+# Initialize the plot
+plot(cpm_counts_density[[1]], xlim = xlim, ylim = ylim, type = "n", 
+     ylab = "Smoothing density of log2-CPM", main = "Original Count", cex.lab = 0.8)
+
+# Plot each density line
+for (i in 1:length(cpm_counts_density)) {
+  lines(cpm_counts_density[[i]], col = cols[i])
+}
+
+
+# TMM normalized data ##################
+
+tmm_counts_density <- apply(log2(edgeR::cpm(normalized_counts)), 2, density)
+
+# Calculate the limits across all the samples for normalized counts
+xlim <- range(sapply(tmm_counts_density, function(d) d$x))
+ylim <- range(sapply(tmm_counts_density, function(d) d$y))
+
+# Plot the normalized count data density
+plot(tmm_counts_density[[1]], xlim = xlim, ylim = ylim, type = "n", 
+     ylab = "Smoothing density of log2-CPM", main = "Normalized count", cex.lab = 0.8)
+
+# Plot each density line
+for (i in 1:length(tmm_counts_density)) {
+  lines(tmm_counts_density[[i]], col = cols[i])
+}
+
+
+# Add the combined legend outside the plotting region
+par(xpd = TRUE)  # Allow plotting outside the plot area
+legend("topright", 
+       legend = colnames(normalized_counts),  
+       col = cols, 
+       lty = ltys, 
+       cex = 0.34, 
+       border = "blue", 
+       text.col = "green4", 
+       merge = TRUE, 
+       bg = "gray90", 
+       ncol = 1,  # Arrange the legend in one column
+       inset = c(-0.2, 0))  # Move the legend outside the plot
+
+par(xpd = FALSE)  # Restore normal plotting behavior
+```
+
+Our dataset does not appear to have changed much after TMM normalization. This is
+good - it suggests that differences in library size and composition between 
+samples were minimal, indicating technical consistency in our data.
+
+Now, lets try a box plot.
+
+```{r}
+# ==================
+# Plot TMM and non-TMM counts - Box Plot
+# ==================
+
+# Set up the plotting area for two plots side by side
+par(mfrow=c(1,2))
+
+# Plot the filtered (not yet normalized) data
+log_filtered_counts <- log2(edgeR::cpm(filtered_data_matrix))
+log_filtered_counts[is.infinite(log_filtered_counts)] <- NA  # Replace -Inf with NA
+
+boxplot(log_filtered_counts, xlab = "Samples", ylab = "log2 CPM", 
+        las = 2, cex = 0.5, cex.lab = 0.5,
+        cex.axis = 0.5, main = "Filtered Count")
+# Draw the median
+abline(h = median(apply(log_filtered_counts, 2, median)), 
+       col = "red", lwd = 0.6, lty = "dashed")
+
+# Plot the normalized data
+log_norm_counts <- log2(normalized_counts)
+log_norm_counts[is.infinite(log_norm_counts)] <- NA         # Replace -Inf with NA
+boxplot(log_norm_counts, xlab = "Samples", ylab = "log2 CPM", 
+        las = 2, cex = 0.5, cex.lab = 0.5,
+        cex.axis = 0.5, main = "Normalized")
+# Draw the median
+abline(h = median(apply(log_norm_counts, 2, median)), 
+       col = "red", lwd = 0.6, lty = "dashed")
+```
+Like the smooth line plot, little appears to have changed. Looks good!
+
+Finally, lets look at the distance between our data using an MDS plot.
+```{r}
+# ==================
+# Plot TMM and non-TMM counts - MDS PLot
+# ==================
+
+# Define colors for different combinations of layer & diagnosis
+unique_groups <- unique(paste(sample_type_df$layer, sample_type_df$diagnosis))
+color_map <- setNames(rainbow(length(unique_groups)), unique_groups)
+
+# Generate MDS plot with colors by layer & diagnosis
+limma::plotMDS(d, 
+               labels = NULL, 
+               pch = 1, 
+               col = color_map[paste(sample_type_df$layer, sample_type_df$diagnosis)])
+
+# Add legend
+legend("topright",
+       legend = unique_groups,
+       pch = 1,
+       col = color_map,
+       title = "Layer & Diagnosis",
+       bty = 'n', cex = 0.75)
+```
+
+# Conclusion 
+
+We've gone through the steps of downloading, exploring, cleaning, and normalizing
+an RNA-seq dataset from GEO! To download our dataset to the current working directory,
+we will do the following.
+
+```{r}
+# ==================
+# Download dataset
+# ==================
+
+# Save the cleaned RNA-seq data as a tab-delimited file
+write.table(clean_data, file = "GSE251939_counts_clean_norm.txt", sep = "\t", 
+            row.names = FALSE, col.names = TRUE)
+```
+
+#### Why is the dataset of interest to you?
+
+Before finding this dataset, I was unaware of the connection between Down Syndrome
+and Alzheimer's Disease. Many people with Down Syndrome develop Alzheimer's 
+pathology, norably in their L3 and L5 pyramidal neurons from the frontal cortex 
+[@DS_article]. This RNAseq dataset of L3 and L5 pyramidal neurons from individuals 
+with Down Syndrome sets up an interesting analysis. There will inevitably be differential
+expression among genes from chromosome 21, but are these the only differentially
+expressed genes in these conditions? Is differential expression of chromosome 21
+genes solely responsible for the Alzheimer's pathology found in individuals with
+Down Syndrome?
+
+#### What are the control and test conditions of the dataset?
+
+Test: Samples from brains of individuals with Down Syndrome (42-67 years old)
+
+Control: Samples from brains of control brains (individuals of similar age to
+the Down Syndrome samples, without Down Syndrome)
+
+#### How many samples in each of the conditions of your dataset?
+
+12 Down Syndrome samples (6M/6F), 17 control samples (9M/8F).
+
+#### Were there expression values that were not unique for specific genes? How did you handle these?
+
+After mapping the ensembl gene IDs that represented each row to a HUGO symbol,
+I found that there were 52 duplicated ensembl gene IDs and 20677 duplicate HUGO 
+symbols. These were removed by selecting only the first out of all groups of 
+duplicates.
+
+#### Were there expression values that could not be mapped to current HUGO symbols?
+
+There were 107 expression values that could not be mapped to any HUGO symbols
+since they were represented by retured ensembl gene IDs.
+
+#### Were there any outliers in your dataset? How were they handled in the originating paper? How many outliers were removed?
+
+I did not find any significant outliers based on expression, however, some ensembl
+gene IDs that were used to represent genes in the dataset were retired. I removed
+expression data for genes with retired ensembl gene IDs.
+
+#### How did you handle replicates?
+
+I combined technical replicates into one replicate per sample by averaging
+expression data across replicates.
+
+#### What is the final coverage of your dataset?
+
+The dataset covers 18027 genes.
+
+
+# References
