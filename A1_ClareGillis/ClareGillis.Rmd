@@ -10,6 +10,9 @@ bibliography: A1_bib.bib
 csl: biomed-central.csl
 nocite: '@*'
 ---
+```{r setup, include=FALSE}
+options(timeout = 300)  # Increase timeout for HTTP requests
+```
 
 ```{r message=FALSE, warning=FALSE, echo=FALSE}
 # ==================
@@ -73,6 +76,7 @@ I'll begin by downloading the dataset from GEO using the getGEO program
 data_set_geoid <- "GSE251939"
 gse <- GEOquery::getGEO(data_set_geoid ,GSEMatrix=FALSE)
 ```
+<br />
 
 ## Data Summary
 
@@ -87,7 +91,7 @@ design <- gse@header$overall_design[[1]]
 
 cat(title, summary, design)
 ```
-
+<br />
 ===============================================================================
 
 To summarize, this is a dataset of batch RNAseq data from layer 3 (L3) and 5 (L5)
@@ -116,6 +120,7 @@ Lets start by extracting some of the overview information about the dataset.
 current_gpl <- names(GPLList(gse))[1]
 current_gpl_info <- GEOquery::Meta(getGEO(current_gpl))
 ```
+<br />
 
 The dataset I've selected needs to contain recent (less than 10 years old) human 
 RNA-seq data (generally gathered through high throughput sequencing.)
@@ -130,7 +135,7 @@ cat(paste("Last update date:", current_gpl_info$last_update_date, "\n"))
 cat(paste("Organism:", current_gpl_info$organism, "\n"))
 cat(paste("Technology:", current_gpl_info$technology, "\n"))
 ```
-
+<br />
 Looks good!
 
 Now that we know the most basic criteria are met, lets take a closer look at what
@@ -145,7 +150,7 @@ files.
 sfilenames = GEOquery::getGEOSuppFiles(data_set_geoid, fetch_files = FALSE)
 sfilenames$fname
 ```
-
+<br />
 We're given 6 files - let's download them to our current directory so we can
 open and use them.
 
@@ -180,7 +185,7 @@ if(length(missing_files) > 0){
 }
 
 ```
-
+<br />
 ### Extract Count Matrices
 
 Based on the names of the files, we can infer what some of them contain. To start,
@@ -256,7 +261,7 @@ cat(paste(
   )
 
 ```
-
+<br />
 The count matrices contain data for 61906 genes which is excellent coverage, but
 the number of samples is odd... In the summary, we're told that the dataset 
 contains samples from 29 people (12 DS, 17 CTR) - why are we seeing 46 Layer 3 
@@ -272,7 +277,7 @@ cat(paste(gse@gsms[["GSM7990296"]]@header[["extract_protocol_ch1"]][[2]], "\n\n"
 cat(paste(gse@gsms[["GSM7990296"]]@header[["extract_protocol_ch1"]][[3]], "\n\n"))
 cat(paste(gse@gsms[[1]]@header$data_processing[[2]], "\n\n"))
 ```
-
+<br />
 Here the authors explain that they combined each of the two technical replicates
 per sample into one - this would make us expect that there would be exactly 29 
 samples per layer, but this is not the case. Perhaps there is some more
@@ -347,7 +352,7 @@ cat(paste(
   )
 
 ```
-
+<br />
 ## Map to HUGO symbols
 
 Let's now take a quick look at the count matrix itself.
@@ -359,7 +364,7 @@ Let's now take a quick look at the count matrix itself.
 
 kable(combined_replicates[1:7,1:10], format = "html")
 ```
-
+<br />
 The genes seen on the left are denoted by ensembl IDs, however we
 would like to use HUGO gene symbols. Thankfully, it looks like the ensembl 
 IDs are gene IDs (based on the G in ENSG at the beginning of 
@@ -394,7 +399,7 @@ Great! It looks like there's only one dataset of human genes to pick from.
 # ==================
 ensembl_2019 = biomaRt::useDataset("hsapiens_gene_ensembl",mart=ensembl_2019)
 ```
-
+<br />
 Now let's take a look at the filters we can use to search the dataset (this is
 to figure out which search terms to use when mapping our gene IDs to HUGO symbols.)
 ```{r}
@@ -424,7 +429,7 @@ cat(paste("Number of gene IDs with version number:", numWithVersion))
 # Extract only the Gene IDs (the part before the period)
 geneIDs <- sub("\\..*", "", rownames(combined_replicates))
 ```
-
+<br />
 ```{r}
 # ==================
 # Search for HUGO symbols by enesmbl Gene IDs
@@ -523,7 +528,7 @@ cat(paste(
   "Gene IDs in our dataset missing HUGO symbols:", 
   nrow(combined_replicates) - num_with_symbol, "\n"))
 ```
-
+<br />
 Much better! Now let's take a look at those unmapped gene IDs and see why they
 aren't mapped to HUGO symbols
 ```{r}
@@ -532,15 +537,19 @@ aren't mapped to HUGO symbols
 # ==================
 kable(combined_replicates_annot[which(is.na(combined_replicates_annot$hgnc_symbol_2024) & is.na(combined_replicates_annot$hgnc_symbol_2019))[1:5],1:5], type="html")
 ```
-
+<br />
 ![Snapshot of the Ensembl page for ENSG00000288526 [@Ensembl2024]](ENSG00000288526.png)
 
+<br />
 ![Snapshot of the Ensembl page for ENSG00000288531 [@Ensembl2024]](ENSG00000288531.png)
 
+<br />
 ![Snapshot of the Ensembl page for ENSG00000288553 [@Ensembl2024]](ENSG00000288553.png)
 
+<br />
 ![Snapshot of the Ensembl page for ENSG00000288526 [@Ensembl2024]](ENSG00000288554.png)
 
+<br />
 ![Snapshot of the Ensembl page for ENSG00000288526 [@Ensembl2024]](ENSG00000288565.png)
 
 <br />
@@ -556,7 +565,7 @@ clean_data <- combined_replicates_annot[
   !is.na(combined_replicates_annot$hgnc_symbol_2024) | !is.na(combined_replicates_annot$hgnc_symbol_2019), 
 ]
 ```
-
+<br />
 Since we mapped our gene IDs to HUGO symbols using ensembl from 2019 and 2024, 
 there may be some discrepancies. Lets map each entry to its the HUGO symbol from 
 2024 if available, and fall back on the 2019 symbol whenever necessary.
@@ -571,7 +580,7 @@ clean_data <- clean_data %>%
   mutate(hgnc_symbol = coalesce(hgnc_symbol_2024, hgnc_symbol_2019)) %>%
   select(-hgnc_symbol_2024, -hgnc_symbol_2019)
 ```
-
+<br />
 Finally, lets make sure that each symbol and gene ID is unique.
 ```{r}
 # ==================
@@ -591,7 +600,7 @@ cat(paste(
   )
   )
 ```
-
+<br />
 The dataset contains many duplicated hgnc symbols and 53 ensembl gene IDs are 
 duplicates - lets take one from each duplicated set of ensembl IDs and hgnc symbols.
 ```{r}
@@ -612,7 +621,7 @@ clean_data <- clean_data %>%
 
 
 ```
-
+<br />
 Great! Now we have a dataset of RNA-Seq data where each row corresponds to a gene
 represented by a unique HUGO symbol! We can now move onto normalization.
 
@@ -660,7 +669,7 @@ sample_counts <- sample_type_dt[, .(count = .N), by = .(layer, diagnosis)]
 sample_counts
 
 ```
-
+<br />
 The fewest samples we have for a category is 12 - this will be important for our
 CPM normailization.
 
@@ -688,7 +697,7 @@ min_num_samples <- 10
 keep <- rowSums(edgeR::cpm(data_matrix) > 1) > min_num_samples
 filtered_data_matrix <- data_matrix[keep,]
 ```
-
+<br />
 Let's take a look at our expression data before and after CPM normalization
 ```{r echo=FALSE}
 # Plot pre- and post-CPM filtering #
@@ -767,16 +776,14 @@ Lets apply TMM notmalization to our dataset.
 # Apply TMM normalization
 # ==================
 
-sample_type_df = as.data.frame(sample_type, stringsAsFactors = FALSE)
-
 # Apply TMM to the data
 d = edgeR::DGEList(counts=filtered_data_matrix, 
-            groups = factor(sample_type_df$layer, sample_type_df$diagnosis))
+            groups = factor(sample_type_dt$layer, sample_type_dt$diagnosis))
 d = edgeR::calcNormFactors(d)
 
 normalized_counts <- edgeR::cpm(d)
 ```
-
+<br />
 Let's take a look at our data before and after TMM normalization. We can use
 various graphing techniques to understand our data in different ways. First we'll
 try a smooth line plot.
@@ -845,7 +852,7 @@ legend("topright",
 
 par(xpd = FALSE)  # Restore normal plotting behavior
 ```
-
+<br />
 Our dataset does not appear to have changed much after TMM normalization. This is
 good - it suggests that differences in library size and composition between 
 samples were minimal, indicating technical consistency in our data.
@@ -881,23 +888,25 @@ boxplot(log_norm_counts, xlab = "Samples", ylab = "log2 CPM",
 abline(h = median(apply(log_norm_counts, 2, median)), 
        col = "red", lwd = 0.6, lty = "dashed")
 ```
+<br />
 Like the smooth line plot, little appears to have changed. Looks good!
 
 Finally, lets look at the distance between our data using an MDS plot.
 ```{r}
 # ==================
-# Plot TMM and non-TMM counts - MDS PLot
+# Plot TMM and non-TMM counts - MDS Plot
 # ==================
 
 # Define colors for different combinations of layer & diagnosis
-unique_groups <- unique(paste(sample_type_df$layer, sample_type_df$diagnosis))
+unique_groups <- unique(paste(sample_type_dt$layer, sample_type_dt$diagnosis))
 color_map <- setNames(rainbow(length(unique_groups)), unique_groups)
 
-# Generate MDS plot with colors by layer & diagnosis
+# Generate MDS plot with colors by layer & diagnosis - this is a plot of the
+# counts and the normalization factors
 limma::plotMDS(d, 
                labels = NULL, 
                pch = 1, 
-               col = color_map[paste(sample_type_df$layer, sample_type_df$diagnosis)])
+               col = color_map[paste(sample_type_dt$layer, sample_type_dt$diagnosis)])
 
 # Add legend
 legend("topright",
@@ -907,6 +916,23 @@ legend("topright",
        title = "Layer & Diagnosis",
        bty = 'n', cex = 0.75)
 ```
+<br />
+This plot shows the dispersion of our count data, colour coded by type (layer
+and diagnosis). It essentially flattens the distance between each set of points
+into a 2D space. From this, we can see that our data clusters very well by layer
+and type. Moreover, it clusters best by layer - this is to be expected. We would
+expect differential expression in genes betwen different cell types due to 
+different transctiptional regulation. While we would expect differential expression
+between Down Syndrome and Control samples (especially for genes on chromosome 21
+of which Down Syndrome cells have 3,) we would expect more differential expression
+between cell types since transcriptional regulation affects all chromosomes.
+
+The genes in our data are not separated by chromosome (or more specifically 
+chromosome 21 vs other chromosomes) so we are unable to see whether there is differential
+expression between control and Down Syndrome samples for genes on chromosomes other
+than 21. This would be an interesting analysis that I hope to look into in future
+assignments.
+
 
 # Conclusion 
 
@@ -920,9 +946,15 @@ we will do the following.
 # ==================
 
 # Save the cleaned RNA-seq data as a tab-delimited file
-write.table(clean_data, file = "GSE251939_counts_clean_norm.txt", sep = "\t", 
-            row.names = FALSE, col.names = TRUE)
+write.table(clean_data, 
+            file.path(getwd(), data_set_geoid, 
+                      paste(data_set_geoid,
+                            "normalized_filtered_RSEM_counts.txt",sep="_")),
+            quote = FALSE,
+            sep="\t",
+            row.names = TRUE)
 ```
+<br />
 
 #### Why is the dataset of interest to you?
 
