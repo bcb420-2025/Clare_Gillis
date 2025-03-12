@@ -637,9 +637,5 @@ level (ex. molecular) pathway annotations.
 * There is evidence of increased levels of Fas proteins and apoptosis in DS brains [@Fas_DS, @Fas].
 * There is a high incidence of autoimmune disease among DS individuals (@DS_Autoimmune1, @DS_Autoimmune2) which supports the terms involving T-cells, the MHC, and inflammation management
 
-
-```{r}
-knitr::write_bib(c(.packages()), "packages.bib")
-```
 # References
 
