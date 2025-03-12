@@ -1,0 +1,645 @@
+---
+title: "BCB420: Assignment 2"
+subtitle: "Differential Gene expression and Preliminary Over-Representation Analysis of Down Syndrome vs Control L3 and L5 Pyramidal Neurons"
+author: "Clare Gillis"
+date: "03/12/2025"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    number_sections: true
+    theme: flatly
+    highlight: tango
+    fig_caption: true
+    df_print: paged 
+    code_folding: hide
+bibliography: A2_references.bib
+nocite: '@*'
+link-citations: true
+---
+
+# Introduction
+
+Down Syndrome (DS) is a genetically complex condition resulting from the triplication
+of chromosome 21. Roughly 1 in every 700 babies born has DS. DS individuals have a variety of phenotypic abnormalities but are notably coginitively impaired. Alzheimer's Disease (AD) pathology is universal among individuals with DS and onset generally occurs around their mid-30s [@article1]. To investigate the connection between DS and AD pathology, Alldred et al. performed bulk RNA Seq of layer 3 (L3) and 5 (L5) pyramidal neurons of individuals with Down Syndrome (DS) compared to control brains [@article1].
+
+I have [previously cleaned and normalized](https://github.com/bcb420-2025/Clare_Gillis/blob/main/A1_ClareGillis/ClareGillis.Rmd) the RNASeq dataset created by Alldred et al. which is available at GEO accession [GSE251939](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE251939). Duplicate genes were removed, technical replicates were combined, each gene was mapped to a HUGO gene symbol, and the dataset was normalized using CMM and TMM. The resulting expression dataset covers 18027 genes.
+
+The analysis below focuses on differential gene expression of the cleaned and normalized data, followed by a thresholded over-representation analysis of the genes in question.
+
+We will begin by importing the necessary packages for our analysis. We will use GEOquery [@GEOquery2007] to retrieve information about each sample (diagnosis, layer, etc), edgeR [@edgeR2016] to model differential gene expression in our data, ggplot2 [@ggplot22016] to visualize the number of differentially expressed genes, circlize [@circlize] & ComplexHeatmap [@ComplexHeatmap] to display our differential expression data as a heatmap, and GSA [@GSA] & gprofiler2 [@gprofiler] to perform a thresholded over expression analysis.
+```{r message=FALSE, warning=FALSE, results='hide'}
+# ==================
+# Install Required Packages - TODO figure out which ones I actually need
+# ==================
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+
+if (!requireNamespace("GEOquery", quietly = TRUE)) {
+  BiocManager::install("GEOquery")
+}
+
+if (!requireNamespace("edgeR", quietly = TRUE)) {
+  BiocManager::install("edgeR")
+}
+
+if (!requireNamespace("biomaRt", quietly = TRUE)) {
+  BiocManager::install("biomaRt")
+}
+
+if (!requireNamespace("kableExtra", quietly = TRUE)){
+  install.packages("kableExtra")
+}
+
+if (!requireNamespace("R.utils", quietly = TRUE)){
+  install.packages("R.utils")
+}
+
+if (!requireNamespace("ComplexHeatmap", quietly = TRUE)){
+  install.packages("ComplexHeatmap")
+}
+
+if (!requireNamespace("circlize", quietly = TRUE)){
+  install.packages("circlize")
+}
+
+if (!requireNamespace("gprofiler2", quietly = TRUE)){
+  install.packages("gprofiler2")
+}
+
+if (!requireNamespace("GSA", quietly = TRUE)){
+  install.packages("GSA")
+}
+
+if (!requireNamespace("ggplot2", quietly = TRUE)){
+  install.packages("ggplot2")
+}
+
+library(ggplot2)
+library(gprofiler2)
+library(GSA)
+library(circlize)
+library(ComplexHeatmap)
+library(R.utils)
+library(kableExtra)
+library(edgeR)
+library(GEOquery)
+library(knitr)
+library(biomaRt)
+```
+
+
+# Differential Gene Expression
+
+## Extract Data
+
+We first import the cleaned, normalized count data created for [Assignment 1](https://github.com/bcb420-2025/Clare_Gillis/blob/main/A1_ClareGillis/ClareGillis.Rmd), then extract the metadata for each sample (diagnosis, layer, etc) from GEO accession  [GSE251939](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE251939) using GEOquery [@GEOquery2007].
+
+```{r message=FALSE, warning=FALSE}
+# ==================
+# Extract the data
+# ==================
+
+# We begin by extracting the normalized clean counts matrix created for A1
+
+norm_counts_clean <- read.table(file.path(getwd(), "normalized_filtered_RSEM_counts.txt"),
+                                header = TRUE,  
+                                sep = "\t",     
+                                quote = "",     
+                                check.names = FALSE)
+
+# Make the data into a matrix
+expressionMatrix <- as.matrix(norm_counts_clean)
+
+```
+
+```{r message=FALSE, warning=FALSE}
+# ==================
+# Extract samples and their categorical information
+# ==================
+
+data_set_geoid <- "GSE251939"
+gse <- GEOquery::getGEO(data_set_geoid ,GSEMatrix=FALSE)
+
+# Extract all samples 
+list_of_samples <- gse@gsms
+
+# Get the name and characteristics of each sample
+sample_type <- do.call(rbind, lapply(list_of_samples, 
+                                     FUN=function(x){
+                                       c(x@header$title,
+                                         x@header$characteristics_ch1)
+                                       }
+                                     )
+                       )
+colnames(sample_type) <- c("title", "cell type", "diagnosis", "layer")
+sample_type[,"cell type"] <- gsub(sample_type[, "cell type"],
+                                  pattern = "cell type: ",
+                                  replacement = "")
+sample_type[,"diagnosis"] <- gsub(sample_type[, "diagnosis"],
+                                  pattern = "diagnosis: ",
+                                  replacement = "")
+sample_type[,"layer"] <- gsub(sample_type[, "layer"],
+                                  pattern = "layer: ",
+                                  replacement = "")
+
+# Extract sample IDs from the title (ex. 'h270' from 'FCPN, Layer3, CTR, h270B_Layer3')
+redundant_sample_type_dt <- data.table::data.table(sample_type)
+redundant_sample_type_dt[, "sampleID"] <- sub(".*(h\\d+).*", "\\1", redundant_sample_type_dt$title)
+
+# Remove all technical replicates
+sample_type_dt <- redundant_sample_type_dt[, .SD[1], by = .(sampleID, layer)]
+
+```
+
+## Model and Predict Differential Expression
+
+To perform a differential gene expression analysis, we next model the cleaned data, taking into account diagnosis, layer, and the interaction between these two features. After fitting the model to our data, we use the quasi likelihood method to predict differential expression of the genes in our dataset between DS and control samples. P-values are corrected using the Benjamini-Hochberg (BH) method [@BH] to control the False Discovery Rate (FDR) and minimize the number of falsely identified differentially expressed genes.
+
+```{r message=FALSE, warning=FALSE}
+# ==================
+# Create the model for the differential expression analysis and fit it to our data
+# ==================
+
+# Create a model to predict differential expression in our dataset that takes
+# into account cell layer and diagnosis (DS vs CTR)
+model_design_pat <- model.matrix(~ sample_type_dt$layer + 
+                                   sample_type_dt$diagnosis +
+                                   sample_type_dt$layer:sample_type_dt$diagnosis
+                                 )
+
+# Use the edgeR package to fit the model to our expression data
+d <- edgeR::DGEList(counts=expressionMatrix, group=sample_type_dt$diagnosis)
+d <- edgeR::estimateDisp(d, model_design_pat)
+fit <- edgeR::glmQLFit(d, model_design_pat)
+
+# Use quasi likelihood method to calculate differential expression
+qlf.ds_vs_ctr <- edgeR::glmQLFTest(fit, coef = 'sample_type_dt$diagnosisDS')
+
+# Display the top differentially expressed genes and perform a BH FDR correction
+kable(topTags(qlf.ds_vs_ctr)$table, 
+      type="html", 
+      p.adjust.method = "BH",
+      row.names = TRUE,
+      caption = "TABLE 1: Top differentially expressed genes in our dataset. logFC = log2 fold change, logCPM = log2 counts per million, F = F-statistic from quasi likelihood test, PValue = raw P value, FDR = Benjamin-Hochberg FDR corrected P values.
+      ") %>% kable_styling(full_width = FALSE, position = "center")
+```
+
+The top results show PValue and FDR values of 0 - in reality these are not 0 but
+are just very low and the limitations of R cause them to be shown as 0. These values
+indicate that many genes are very significantly differentially expressed between 
+DS and control samples.
+
+# BH Correction
+
+We will normalize our data using a Benjamin-Hochberg test to reduce the false
+discovery rate. This test is less stringent than the Bonferroni test but maintains
+statistical power for removing false positives [@BH].
+
+```{r message=FALSE, warning=FALSE}
+# ==================
+# Perform a BH correction
+# ==================
+qlf_output_hits <- edgeR::topTags(qlf.ds_vs_ctr,
+                                  sort.by = "PValue",
+                                  n = nrow(norm_counts_clean),
+                                  adjust.method = "BH")
+num_sig_preBH <- length(which(qlf_output_hits$table$PValue < 0.05 & 
+                                abs(qlf_output_hits$table$logFC) > 1))
+num_sig_postBH <- length(which(qlf_output_hits$table$FDR < 0.05 & 
+                                 abs(qlf_output_hits$table$logFC) > 1))
+
+cat(paste("Number of significantly differentially differentially expressed genes before BH correction: ", num_sig_preBH, "\n"))
+cat(paste("Number of significantly differentially differentially expressed genes after BH correction: ", num_sig_postBH, "\n"))
+```
+
+## Visualization
+
+### Volcano Plot
+
+We can visualize the number of significantly upregulated and downregulated genes
+using a volcano plot. We will plot each gene by the -log10 of its FDR corrected 
+P value and log2 fold change. Significantly upregulated genes (FDR corrected P value < 0.05 and log fold change > 1) are colored red while significantly downregulated genes (FDR corrected P value < 0.05 and log fold change < -1) are colored blue. All other
+genes are colored grey.
+
+```{r fig.width=14, fig.height=10, message=FALSE, warning=FALSE}
+# ==================
+# Volcano Plot
+# ==================
+
+volcano_data <- qlf_output_hits$table
+volcano_data$logFDR <- -log10(volcano_data$FDR)  # Calculate -log10(FDR corrected p-value)
+
+# Define a threshold for significance (e.g., FDR < 0.05 and logFC > 1)
+threshold_FDR <- 0.05
+threshold_logFC <- 1
+
+# Create a column for significance (significant if p-value < 0.05 and logFC > 1 or < -1)
+volcano_data$significant <- with(volcano_data, 
+                                 (FDR < threshold_FDR) & (abs(logFC) > threshold_logFC))
+
+# Create a column for coloring based on the direction of logFC
+volcano_data$color <- with(volcano_data, 
+                           ifelse(significant & logFC > 0, "red", 
+                                  ifelse(significant & logFC < 0, "blue", "gray")))
+
+# Plot FDR corrected values on volcano plot
+ggplot2::ggplot(volcano_data, aes(x = logFC, y = logFDR, color = color)) +
+                geom_point(alpha = 0.6, size = 2) +
+                theme_minimal() +
+                scale_color_manual(values = c("blue", "gray", "red")) + 
+                labs(title = "BH corrected PValue Volcano Plot",
+                     x = "Log2 FC", 
+                     y = "-Log10 PValue",
+                     caption = 
+                       "PLOT 1:
+                     Volcano plot of differential expression for each gene in the cleaned and normalized expression matrix. 
+                     Each gene is plotted by -log10 Benjamin-Hochberg corrected P value vs log2 fold change. 
+                     Significantly upregulated genes (i.e. genes with FDR corrected P value < 0.05 and log fold change > 1) are shown in red. 
+                     Significantly downregulated genes (i.e. genes with FDR corrected P value < 0.05 and log fold change < -1) are shown in blue. 
+                     All other genes are plotted in gray.") +
+                theme(legend.position = "none")
+```
+
+There are many significantly differentially expressed genes in our dataset. Notably, there are more upregulated than downregulated genes which is to be expected in DS. Since DS is caused by the triplication of chromosome 21, we would expect higher levels of genes from chromosome 21 in DS individuals than controls.
+
+### Heatmap
+
+Below we display our differential gene expression data as a heatmap clustered 
+by expression.
+
+```{r fig.width=14, fig.height=10, message=FALSE, warning=FALSE}
+# ==================
+# Create a heatmap of our differential gene expression data including data clustering
+# ==================
+
+# Get the significanly differentially expressed genes
+top_hits <- rownames(qlf_output_hits$table)[qlf_output_hits$table$FDR < 0.05]
+heatmap_matrix_tophits <- t(
+  scale(
+    t(expressionMatrix[
+      which(rownames(expressionMatrix) %in% top_hits),]
+      )
+    )
+)
+
+# Calculate 5th and 95th percentiles
+percentile_5 <- quantile(heatmap_matrix_tophits, 0.05)
+percentile_95 <- quantile(heatmap_matrix_tophits, 0.95)
+
+# Define color scale based on percentiles
+if (percentile_5 == 0) {
+  heatmap_col <- circlize::colorRamp2(c(percentile_5, percentile_95),
+                                      c("white", "red"))
+} else {
+  heatmap_col <- circlize::colorRamp2(c(percentile_5, 0, percentile_95),
+                                       c("blue", "white", "red"))
+}
+
+
+# Add annotations to the heatmap to show data clustering
+
+# Assign a color to each sample
+unique_samples <- unique(sample_type_dt$sampleID)
+unique_sample_colors <- rainbow(n = length(unique_samples))
+names(unique_sample_colors) <- unique_samples
+
+# Assign a color to each diagnosis
+unique_diagnosis <- unique(sample_type_dt$diagnosis)
+unique_diagnosis_colors <- rainbow(n = length(unique_diagnosis))
+names(unique_diagnosis_colors) <- unique_diagnosis
+
+# Assign a color to each layer
+unique_layer <- unique(sample_type_dt$layer)
+unique_layer_colors <- rainbow(n = length(unique_layer))
+names(unique_layer_colors) <- unique_layer
+
+# Create an annotation to color code each column by sample, diagnosis, and layer
+ha_pat <- ComplexHeatmap::HeatmapAnnotation(
+  df = data.frame(
+  samples = sample_type_dt$sampleID,
+  diagnosis = sample_type_dt$diagnosis,
+  layer = sample_type_dt$layer),
+  col = list(
+    samples = unique_sample_colors,
+    diagnosis = unique_diagnosis_colors,
+    layer = unique_layer_colors),
+  show_legend = TRUE)
+
+# Create a color coded heatmap of the differential expression data, clustered
+# as much as possible
+heatmap <- ComplexHeatmap::Heatmap(
+  as.matrix(heatmap_matrix_tophits),
+  top_annotation = ha_pat,
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  show_row_dend = TRUE,
+  show_column_dend = TRUE,
+  col = heatmap_col,
+  show_column_names = TRUE,
+  show_row_names = FALSE,
+  show_heatmap_legend = TRUE,
+  use_raster = TRUE,
+  column_title = ("Significantly differentially expressed genes DS vs CTR"),)
+
+# Display the heatmap
+heatmap
+```
+*PLOT 2: Heat map of differential gene expression across all samples. Gene expression is shown on a scale from blue (heavily downregulated) to red (heavily upregulated.) The ends of the expression color spectrum are the 5th and 95th percentile expression levels. Genes and samples are clustered. Each column is color coded by sample, diagnosis, and cell layer (see the legend on the right.) *
+
+<br />
+
+Our data clusters well by diagnosis and clusters somewhat by layer.
+This is to be expected as triplication of chromosome 21 results in significantly
+different gene expression among individuals with DS compared to controls.
+
+# Thresholded Over-Representation Analysis
+
+The second section of our report focuses on an over-representation analysis (ORA) of
+the differentially expressed genes in our dataset.
+
+## Rank genes
+
+We use a ranked gene list based on fold change and P value for our 
+ORA since, although it is slower and more difficult to understand than a thresholded
+list, it makes our analysis more sensitive to weak signals and avoids an arbitrary
+threshold [@rank].
+
+```{r message=FALSE, warning=FALSE}
+# ==================
+# Function to create and save ranked gene lists
+# ==================
+rank_and_save <- function(gene_table, save_filename){
+  # Rank the genes in gene_table by PValue and logFC, remove any genes without
+  # gene symbols, and save the ranked gene list in the working directory in a 
+  # file called save_filename
+  
+  # Remove 0 P Values since they give infinite -log values
+  gene_table$PValue[gene_table$PValue == 0] <- 
+    min(gene_table$PValue[gene_table$PValue > 0], na.rm = TRUE)
+  
+  # Rank genes
+  gene_table[, "rank"] <-
+    -log(gene_table$PValue, base = 10) *
+    sign(gene_table$logFC)
+
+  # Order the list of genes by rank (descending order)
+  gene_table <- gene_table[order(-gene_table$rank),]
+  
+  # Remove genes without gene symbols (shouldn't be any? not really sure)
+  gene_table <- 
+    gene_table[
+      !is.na(rownames(gene_table)) & 
+        rownames(gene_table) != "", ]
+  
+  # Save the ranked list of genes
+  write.table(x=data.frame(
+    genename = rownames(gene_table),
+    F_stat = gene_table$rank),
+    file = file.path(getwd(), save_filename),
+    sep = "\t",
+    row.names = FALSE,
+    col.names = FALSE,
+    quote = FALSE)
+}
+```
+
+We perform and compare the results of ORA using three ranked lists:
+
+* All genes
+* Only upregulated genes
+* Only downregulated genes
+
+```{r message=FALSE, warning=FALSE}
+# ==================
+# Create and save 4 ranked gene lists
+# ==================
+
+# All
+all_genes <- qlf_output_hits$table
+rank_and_save(all_genes, "DS_vs_CTR_ranked_genelist.txt")
+
+# Upregulated
+upregulated_genes <- 
+  qlf_output_hits$table[which(qlf_output_hits$table$logFC > 0),]
+rank_and_save(upregulated_genes, "DS_vs_CTR_ranked_upregulated_genelist.txt")
+
+# Downregulated
+downregulated_genes <- 
+  qlf_output_hits$table[which(qlf_output_hits$table$logFC < 0),]
+rank_and_save(downregulated_genes, "DS_vs_CTR_ranked_downregulated_genelist.txt")
+
+```
+
+
+## Query g:Profiler
+
+```{r message=FALSE, warning=FALSE} 
+# ==================
+# Get version info
+# ==================
+version_info <- get_version_info(organism="hsapiens")
+```
+We are using g:Profiler version `r version_info$gprofiler_version` to search source
+databases Gene Ontology Biological Processes version `r version_info$sources$"GO:BP"$version`, 
+Kyoto Encyclopedia of Genes and Genomes version `r version_info$sources$KEGG$version`, 
+WikiPathways version `r version_info$sources$WP$version`, and Reactome version `r version_info$sources$REAC$version`. We chose these source databases since they
+include high level annotations about biological processes which are easier to
+interpret than low level (ex. molecular) pathway annotations.
+
+
+```{r message=FALSE, warning=FALSE}
+# ==================
+# Function to perform g:Profiler call
+# ==================
+do_gprofiler <- function( 
+    genelist_file,
+    source = c("REAC","WP", "KEGG","GO:BP"),
+    working_dir = getwd(),
+    data_dir = getwd(),
+    max_gs_size = 250,
+    min_gs_size = 3,
+    min_intersection = 3,
+    organism = "hsapiens",
+    dest_gmt_file = ""
+){
+  # Load the ranked gene list, call g:Profiler, and return the enrichment results
+  
+  #load in the file
+  genelist <- read.table(file = file.path(data_dir, genelist_file),
+                         header = FALSE,
+                         sep = "\t", 
+                         quote = "",
+                         stringsAsFactors = FALSE)
+
+  query_set <- genelist$V1
+
+
+  # Query g:Profiler using the ranked gene set
+  gprofiler_results <- gprofiler2::gost(
+    query = query_set ,
+    significant=FALSE,
+    ordered_query = TRUE,
+    exclude_iea=TRUE,
+    correction_method = "fdr",
+    organism = organism,
+    source = source)
+
+  enrichment_results <- gprofiler_results$result
+  
+  return(enrichment_results)
+}
+
+```
+
+```{r message=FALSE, warning=FALSE}
+# ==================
+# Do g:Profiler for each ranked list
+# ==================
+
+# Do g:Profiler on all genes
+if (!exists("all_gprofile")) {
+  all_gprofile <- do_gprofiler("DS_vs_CTR_ranked_genelist.txt")
+}
+
+# Do g:Profiler on upregulated genes
+if (!exists("up_gprofile")) {
+  up_gprofile <- do_gprofiler("DS_vs_CTR_ranked_upregulated_genelist.txt")
+}
+
+# Do g:Profiler on downregulated genes
+if (!exists("down_gprofile")) {
+  down_gprofile <- do_gprofiler("DS_vs_CTR_ranked_downregulated_genelist.txt")
+}
+```
+
+# g:Profiler results
+
+```{r message=FALSE, warning=FALSE}
+# ==================
+# Look at number of significant terms for each list
+# ==================
+num_sig_all <- length(which(all_gprofile$significant == TRUE))
+num_sig_up <- length(which(up_gprofile$significant == TRUE))
+num_sig_down <- length(which(down_gprofile$significant == TRUE))
+
+cat(paste("Number of significant terms from g:Profiler of all genes together: ", num_sig_all, "\n"))
+cat(paste("Number of significant terms from g:Profiler of upregulated genes: ", num_sig_up, "\n"))
+cat(paste("Number of significant terms from g:Profiler of downregulated genes: ", num_sig_down, "\n"))
+```
+
+The number of significant g:Profiler terms is drastically highest for our query
+of upregulated genes alone. We expected more significant terms related to upregulated
+genes than downregulated genes since there are far more significantly upregulated
+than downregulated genes in our set (see the [volcano plot](#volcano-plot).) Since
+we see that downregulated genes alone do not enrich any terms, it is likely that
+the presence of these genes (and any genes that are not significantly differentially
+expressed) dilute the signal from the query containing all genes. Especially when
+paired with multiple hypothesis testing, this likely accounts for the large disparity
+in the number of significant terms between our query of all genes and only upregulated
+genes. 
+
+The few (`9`) significant terms from the query of all genes maintained
+statistical significance despite dilution and multiple hypothesis testing. Hence,
+these must have the strongest signal, so we will focus on these during the 
+interpretation.
+
+
+```{r message=FALSE, warning=FALSE}
+# ==================
+# Display the names and descriptions of each significant term for the all_gprofile results
+# ==================
+
+kable(all_gprofile[all_gprofile$significant == TRUE, c("term_name", "p_value")],
+      type = "HTML",
+      row.names = FALSE,
+      caption = "TABLE 2: Significant terms found using g:Profiler of all ranked genes and the P value of term enrichment"
+      )
+```
+# Interpretation
+
+The analysis performed by Alldred et al. revealed upregulation in the stress
+response pathways of DS samples [@article1]. Specifically, they found upregulation in acute phase response signaling, neuroinflammation signaling, and senescence [@article1]. While the specific terms they found were not significantly enriched in our analysis, all three were non-significantly highlighted in the results from the query of upregulated genes. Moreover, the 9 terms significantly enriched from our query of all genes are all either directly associated with a stress response (ex. positive regulation of apoptotic cell clearance) or indirectly related to a stress response by relation to immune response (ex. T cell activation via T cell receptor contact with antigen bound to MHC molecule on antigen presenting cell)
+
+Alldred et al. also found significant downregulation of a number of pathways involved in recycling and cellular processing [@article1]. Our analysis did not highlight any significantly enriched terms associated with downregulated genes. This may be due to differences in methods. For example, we chose to use a non-thresholded query for our pathway analysis, while Alldred et al. did not specify whether they used a thresholded or non-thresholded gene list [@article1]. Moreover, they queried an additional database source database (ie. STRING in Cytoscape) [@article1] which could account for some disparities between our results. 
+
+Our pathway analysis suggests immune dysregulation and enhanced apoptosis in the DS samples - two well documented features of DS. A 1999 study by Seidl et al. found higher levels of the APO-1/Fas (CD95) protein in the cerebral cortices and cerabellums of DS individuals compared to controls [@Fas_DS]. This protein is key in the initiation of apoptosis [@Fas], so this study supports both enriched terms "positive regulation of apoptotic cell clearance" and "Fas signaling pathway." 
+
+Moreover, there has been extensive research, for decades, into immune dysregulation associated with Down Syndrome. In the immune system, normally, Major Histocompatibility Complexes (MHCs) display peptides from antigens as signals for T-cells to attack [@MHC]. In autoimmune disease, MHCs display self-peptides resulting in T-cells attacking parts of the body and causing inflammation [@MHC]. There is a high prevalence of autoimmune disease among individuals with DS (@DS_Autoimmune1, @DS_Autoimmune2), explaining the enriched terms: T cell activation via T cell receptor contact with antigen bound to MHC molecule on antigen presenting cell, negative regulation of inflammatory response to antigenic stimulus, peptide antigen assembly with MHC class II protein complex, MHC class II protein complex assembly, regulation of T cell activation via T cell receptor contact with antigen bound to MHC molecule on antigen presenting cell, membrane to membrane docking, and Macrophage markers.
+
+# Discussion
+
+Below are simple answers to each question asked in the assignment description. 
+Each question also links to the section of the report where the analysis was done.
+
+## Differential Gene Expression Analysis
+
+### [How many genes were significantly differentially expressed? What thresholds did you use and why?](#volcano-plot)
+
+* `r num_sig_postBH` genes were significantly differentially expressed.
+* We used the thresholds of FDR corrected P_value < 0.05 since this is the commonly 
+accepted threshold for statistical significance, and absolute log2 fold change > 1
+since this indicates the gene is up or down regulated.
+
+### [Which hypothesis testing method did you use? And Why? How many genes passed correction?](#bh-correction)
+
+* We used the Benjamin-Hochberg multiple hypothesis test because this test controls
+the false discovery rate. It is less stringent than the Bonferroni test but maintains
+significant statistical power [@BH]. 
+* `r num_sig_postBH` genes passed BH correction
+
+### [Do you conditions cluster together in a heatmap? Explain why or why not.](#heatmap)
+
+* The samples cluster well by diagnosis and cluster fairly well by layer. This
+makes sense since triplication of chromosome 21 should result in significantly
+different gene expression between DS and control samples. There should also be
+differential gene expression between layers, but this should be less extreme than
+between control cells and those with a triplicated chromosme 21 (i.e. DS samples).
+
+## Thresholded Over-Representation Analysis
+
+### [Which method did you choose and why?](#rank-genes)
+
+* We chose to use a non-thresholded gene list since, although it is slower and more
+difficult to understand than a thresholded list, it is more sensitive to weaker signals
+and avoids using an arbitrary threshold [@rank].
+
+### [What annotation data did you use and why? What version of the annotation are you using?](#query-gprofiler)
+
+* We used g:Profiler version `r version_info$gprofiler_version` to search source
+databases Gene Ontology Biological Processes version `r version_info$sources$"GO:BP"$version`, 
+Kyoto Encyclopedia of Genes and Genomes version `r version_info$sources$KEGG$version`, 
+WikiPathways version `r version_info$sources$WP$version`, and Reactome version `r version_info$sources$REAC$version`. We used these annotation datasets since they
+contain higher level pathway annotation which are easier to interpret than lower
+level (ex. molecular) pathway annotations.
+
+### [How many genesets were returned with what thresholds?](#gprofiler-results)
+
+* With a p value threshold of < 0.05:
+* Number of significant terms from g:Profiler of all genes together: `r num_sig_all`
+* Number of significant terms from g:Profiler of upregulated genes: `r num_sig_up`
+* Number of significant terms from g:Profiler of downregulated genes: `r num_sig_down`
+
+### [How do the results from the analysis using the up-regulated set of genes, and the down-regulated set of genes separately compare to using the whole list?](#gprofiler-results)
+
+* The number of significant g:Profiler terms is drastically highest for our query of upregulated genes alone. We expected more significant terms related to upregulated genes than downregulated genes since there are far more significantly upregulated than downregulated genes in our set (see the [volcano plot](#volcano-plot.) Since we see that downregulated genes alone do not enrich any terms, it is likely that the presence of these genes (and any genes that are not significantly differentially expressed) dilute the signal from the query containing all genes. Especially when paired with multiple hypothesis testing, this likely accounts for the large disparity in the number of significant terms between our query of all genes and only upregulated genes.
+
+## Interpretation
+
+### [Do the over-representation results support conclusions or mechanism discussed in the original paper?](#interpretation)
+
+* The upregulated over-representation results support conclusions from the original paper.
+* The original paper found many over-represented gene sets of downregulated genes while we found none. This may be due to differences in methods.
+
+### [Can you find evidence, i.e. publications, to support some of the results that you see. How does this evidence support your results.](#interpretation)
+
+* There is evidence of increased levels of Fas proteins and apoptosis in DS brains [@Fas_DS, @Fas].
+* There is a high incidence of autoimmune disease among DS individuals (@DS_Autoimmune1, @DS_Autoimmune2) which supports the terms involving T-cells, the MHC, and inflammation management
+
+
+```{r}
+knitr::write_bib(c(.packages()), "packages.bib")
+```
+# References
+
