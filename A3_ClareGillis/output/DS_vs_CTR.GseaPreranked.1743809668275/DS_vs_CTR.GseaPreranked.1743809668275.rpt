@@ -1,0 +1,23 @@
+producer_class	xtools.gsea.GseaPreranked
+producer_timestamp	1743809668275
+param	rpt_label	DS_vs_CTR
+param	rnd_seed	12345
+param	set_min	15
+param	zip_report	false
+param	create_svgs	false
+param	scoring_scheme	weighted
+param	rnk	/home/rstudio/projects/Clare_Gillis/A3_ClareGillis/DS_vs_CTR_ranked_genelist.rnk
+param	norm	meandiv
+param	out	/home/rstudio/projects/Clare_Gillis/A3_ClareGillis/output
+param	mode	Max_probe
+param	include_only_symbols	true
+param	help	false
+param	set_max	200
+param	gmx	/home/rstudio/projects/Clare_Gillis/A3_ClareGillis/output/Human_GOBP_AllPathways_noPFOCR_no_GO_iea_March_01_2025_symbol.gmt
+param	make_sets	true
+param	plot_top_x	20
+param	gui	false
+param	nperm	1000
+param	collapse	No_Collapse
+
+file	/home/rstudio/projects/Clare_Gillis/A3_ClareGillis/output/DS_vs_CTR.GseaPreranked.1743809668275/index.html

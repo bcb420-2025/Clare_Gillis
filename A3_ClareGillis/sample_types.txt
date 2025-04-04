@@ -1,0 +1,59 @@
+	sampleID	layer	title	cell type	diagnosis
+1	h270	Layer3	FCPN, Layer3,CTR, h270AR_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+2	h277	Layer3	FCPN, Layer3,DS, h277_Layer3	frontal cortex pyramidal neurons from Layer 3	DS
+3	h278	Layer3	FCPN, Layer3,DS, h278_Layer3	frontal cortex pyramidal neurons from Layer 3	DS
+4	h279	Layer3	FCPN, Layer3,DS, h279_Layer3	frontal cortex pyramidal neurons from Layer 3	DS
+5	h280	Layer3	FCPN, Layer3,DS, h280AR_Layer3	frontal cortex pyramidal neurons from Layer 3	DS
+6	h281	Layer3	FCPN, Layer3,DS, h281AR_Layer3	frontal cortex pyramidal neurons from Layer 3	DS
+7	h282	Layer3	FCPN, Layer3,DS, h282AR_Layer3	frontal cortex pyramidal neurons from Layer 3	DS
+8	h283	Layer3	FCPN, Layer3,DS, h283B_Layer3	frontal cortex pyramidal neurons from Layer 3	DS
+9	h284	Layer3	FCPN, Layer3,DS, h284_Layer3	frontal cortex pyramidal neurons from Layer 3	DS
+10	h285	Layer3	FCPN, Layer3,DS, h285AR_Layer3	frontal cortex pyramidal neurons from Layer 3	DS
+11	h286	Layer3	FCPN, Layer3, DS, h286AR_Layer3	frontal cortex pyramidal neurons from Layer 3	DS
+12	h287	Layer3	FCPN, Layer3, DS, h287AR_Layer3	frontal cortex pyramidal neurons from Layer 3	DS
+13	h292	Layer3	FCPN, Layer3, CTR, h292R_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+14	h293	Layer3	FCPN, Layer3, CTR, h293_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+15	h294	Layer3	FCPN, Layer3, CTR, h294AR_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+16	h295	Layer3	FCPN, Layer3, CTR, h295AR_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+17	h296	Layer3	FCPN, Layer3, CTR, h296R_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+18	h297	Layer3	FCPN, Layer3, CTR, h297_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+19	h298	Layer3	FCPN, Layer3, CTR, h298AR_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+20	h299	Layer3	FCPN, Layer3, CTR, h299AR_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+21	h300	Layer3	FCPN, Layer3, CTR, h300A_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+22	h301	Layer3	FCPN, Layer3, CTR, h301A_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+23	h302	Layer3	FCPN, Layer3, CTR, h302_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+24	h305	Layer3	FCPN, Layer3, CTR, h305B_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+25	h306	Layer3	FCPN, Layer3, CTR, h306B_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+26	h307	Layer3	FCPN, Layer3, CTR, h307B_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+27	h308	Layer3	FCPN, Layer3, CTR, h308AR_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+28	h309	Layer3	FCPN, Layer3, CTR, h309AR_Layer3	frontal cortex pyramidal neurons from Layer 3	CTR
+29	h311	Layer3	FCPN, Layer3, DS, h311R_Layer3	frontal cortex pyramidal neurons from Layer 3	DS
+30	h270	Layer5	FCPN, Layer5, CTR, h270_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+31	h277	Layer5	FCPN, Layer5, DS, h277_Layer5	frontal cortex pyramidal neurons from Layer 5	DS
+32	h278	Layer5	FCPN, Layer5, DS, h278_Layer5	frontal cortex pyramidal neurons from Layer 5	DS
+33	h279	Layer5	FCPN, Layer5, DS, h279_Layer5	frontal cortex pyramidal neurons from Layer 5	DS
+34	h280	Layer5	FCPN, Layer5, DS, h280_Layer5	frontal cortex pyramidal neurons from Layer 5	DS
+35	h281	Layer5	FCPN, Layer5, DS, h281_Layer5	frontal cortex pyramidal neurons from Layer 5	DS
+36	h282	Layer5	FCPN, Layer5, DS, h282_Layer5	frontal cortex pyramidal neurons from Layer 5	DS
+37	h283	Layer5	FCPN, Layer5, DS, h283_Layer5	frontal cortex pyramidal neurons from Layer 5	DS
+38	h284	Layer5	FCPN, Layer5, DS, h284_Layer5	frontal cortex pyramidal neurons from Layer 5	DS
+39	h285	Layer5	FCPN, Layer5, DS, h285_Layer5	frontal cortex pyramidal neurons from Layer 5	DS
+40	h286	Layer5	FCPN, Layer5, DS, h286R_Layer5	frontal cortex pyramidal neurons from Layer 5	DS
+41	h287	Layer5	FCPN, Layer5, DS, h287R_Layer5	frontal cortex pyramidal neurons from Layer 5	DS
+42	h292	Layer5	FCPN, Layer5, CTR, h292_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+43	h293	Layer5	FCPN, Layer5, CTR, h293_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+44	h294	Layer5	FCPN, Layer5, CTR, h294_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+45	h295	Layer5	FCPN, Layer5, CTR, h295_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+46	h296	Layer5	FCPN, Layer5, CTR, h296_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+47	h297	Layer5	FCPN, Layer5, CTR, h297_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+48	h298	Layer5	FCPN, Layer5, CTR, h298_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+49	h299	Layer5	FCPN, Layer5, CTR, h299_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+50	h300	Layer5	FCPN, Layer5, CTR, h300_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+51	h301	Layer5	FCPN, Layer5, CTR, h301_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+52	h302	Layer5	FCPN, Layer5, CTR, h302_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+53	h305	Layer5	FCPN, Layer5, CTR, h305_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+54	h306	Layer5	FCPN, Layer5, CTR, h306_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+55	h307	Layer5	FCPN, Layer5, CTR, h307_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+56	h308	Layer5	FCPN, Layer5, CTR, h308_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+57	h309	Layer5	FCPN, Layer5, CTR, h309R_Layer5	frontal cortex pyramidal neurons from Layer 5	CTR
+58	h311	Layer5	FCPN, Layer5, DS, h311_Layer5	frontal cortex pyramidal neurons from Layer 5	DS

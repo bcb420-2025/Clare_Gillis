@@ -31,7 +31,7 @@ The analysis below focuses on differential gene expression of the cleaned and no
 We will begin by importing the necessary packages for our analysis. We will use GEOquery [@GEOquery2007] to retrieve information about each sample (diagnosis, layer, etc), edgeR [@edgeR2016] to model differential gene expression in our data, ggplot2 [@ggplot22016] to visualize the number of differentially expressed genes, circlize [@circlize] & ComplexHeatmap [@ComplexHeatmap] to display our differential expression data as a heatmap, and GSA [@GSA] & gprofiler2 [@gprofiler] to perform a thresholded over expression analysis.
 ```{r message=FALSE, warning=FALSE, results='hide'}
 # ==================
-# Install Required Packages - TODO figure out which ones I actually need
+# Install Required Packages
 # ==================
 if (!requireNamespace("BiocManager", quietly = TRUE))
   install.packages("BiocManager")
@@ -205,6 +205,18 @@ qlf_output_hits <- edgeR::topTags(qlf.ds_vs_ctr,
                                   sort.by = "PValue",
                                   n = nrow(norm_counts_clean),
                                   adjust.method = "BH")
+
+write.table(qlf_output_hits$table, file = "/home/rstudio/projects/A3/diff_expr_data.txt", sep = "\t", 
+            quote = FALSE, row.names = TRUE, col.names = NA)
+
+write.table(sample_type_dt, 
+            file = "/home/rstudio/projects/A3/sample_types.txt", 
+            sep = "\t",
+            quote = FALSE, 
+            row.names = TRUE, 
+            col.names = NA
+            )
+
 num_sig_preBH <- length(which(qlf_output_hits$table$PValue < 0.05 & 
                                 abs(qlf_output_hits$table$logFC) > 1))
 num_sig_postBH <- length(which(qlf_output_hits$table$FDR < 0.05 & 
